@@ -1,0 +1,27 @@
+version: '3.9'
+services:
+  jenkins:
+    container_name: jenkins
+    image: jenkins/jenkins:2.440.1-lts-jdk17
+    privileged: true
+    user: root
+    ports:
+      - 8081:8080
+      - 50000:50000
+    volumes:
+      - /var/lib/jenkins:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    environment:
+      - JENKINS_OPTS="--prefix=/jenkins"
+  
+  proxy_http:
+    build: ./nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - jenkins
+    volumes:
+      - /etc/localtime:/etc/localtime:ro

@@ -1,0 +1,160 @@
+---
+- hosts: all
+  vars_files:
+    - vars/all.yml
+  remote_user: "{{ os_user }}"
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Install Python
+      raw: apt -y update && apt install -y python3
+
+    - name: Gather facts after Python installation
+      setup:
+
+    - name: Install required system packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - python3-pip
+          - virtualenv
+          - python3-setuptools
+        state: present
+        update_cache: yes
+
+    - name: Create keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Add Docker GPG apt Key
+      shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      args:
+        creates: /etc/apt/keyrings/docker.gpg
+
+    - name: Set permissions on GPG key
+      file:
+        path: /etc/apt/keyrings/docker.gpg
+        mode: '0644'
+
+    - name: Add Docker Repository
+      apt_repository:
+        repo: "deb [arch={{ ansible_architecture }} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+        filename: docker
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install Docker packages
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+
+    - name: Add user to docker group
+      user:
+        name: "{{ os_user }}"
+        groups: docker
+        append: yes
+      when: os_user is defined
+
+    - name: Enable and start Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Install Docker Python module
+      pip:
+        name: docker
+        state: present
+
+    - name: Create Docker Compose file link
+      file:
+        src: /usr/libexec/docker/cli-plugins/docker-compose
+        dest: /usr/local/bin/docker-compose
+        state: link
+      ignore_errors: yes
+
+    - name: Ensure docker build directory
+      file:
+        state: directory
+        owner: "root"
+        group: "root"
+        path: /var/tmp/docker
+
+    - name: Ensure Jenkins directory on docker host
+      file:
+        state: directory
+        owner: "root"
+        group: "root"
+        path: /var/lib/jenkins
+
+    - name: Create Jenkins directory structure
+      file:
+        state: directory
+        owner: "root"
+        group: "root"
+        mode: "0755"
+        path: "/var/tmp/docker/jenkins/{{ item }}"
+      with_items:
+        - "nginx"
+        - "nginx/sites-enabled"
+
+    - name: Copy Jenkins files
+      copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        owner: "root"
+        group: "root"
+        mode: "0755"
+      with_items:
+        - { src: "files/jenkins/nginx/sites-enabled/proxy", dest: "/var/tmp/docker/jenkins/nginx/sites-enabled/proxy" }
+        - { src: "files/jenkins/nginx/Dockerfile", dest: "/var/tmp/docker/jenkins/nginx/Dockerfile" }
+        - { src: "files/jenkins/nginx/nginx.conf", dest: "/var/tmp/docker/jenkins/nginx/nginx.conf" }
+        - { src: "files/jenkins/docker-compose.yml", dest: "/var/tmp/docker/jenkins/docker-compose.yml" }
+        - { src: "files/jenkins/restart_jenkins.sh", dest: "/var/tmp/docker/jenkins/restart_jenkins.sh" }
+
+    - name: Start up Jenkins with docker-compose
+      shell: cd /var/tmp/docker/jenkins && docker compose build && docker compose up -d
+      # Note: 'docker compose' (no hyphen) is the newer syntax with the plugin
+
+    - name: Wait until Jenkins come up
+      shell: sleep 180
+
+    - name: Get initial admin password
+      shell: 'cat /var/lib/jenkins/secrets/initialAdminPassword'
+      register: admin_auth_token
+    
+    - name: Create CRUMB authentication request
+      uri:
+        url: 'http://localhost:8081/crumbIssuer/api/xml?xpath=concat(//crumbRequestField,":",//crumb)'
+        user: admin
+        password: '{{ admin_auth_token.stdout }}'
+        force_basic_auth: yes
+        return_content: yes
+      register: crumb
+    
+    - name: Add Jenkins administration account
+      uri:
+        method: POST
+        url: 'http://localhost:8081/securityRealm/createAccountByAdmin'
+        user: admin
+        password: '{{ admin_auth_token.stdout }}'
+        force_basic_auth: yes
+        follow_redirects: all
+        headers:
+          Jenkins-Crumb: '{{ crumb.content.split(":")[1] }}'
+          Cookie: '{{ crumb.set_cookie }}'
+        body: 'username={{ jenkins_user }}&password1={{ jenkins_pass }}&password2={{ jenkins_pass }}&fullname={{ jenkins_fullname }}&email={{ jenkins_email }}'
