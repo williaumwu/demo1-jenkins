@@ -5,6 +5,7 @@ def run(stackargs):
     stack = newStack(stackargs)
 
     # Add default variables
+    stack.parse.add_required(key="aws_default_region", default="us-east-1")
     stack.parse.add_required(key="hostname")
     stack.parse.add_required(key="ssh_key_name")
     stack.parse.add_optional(key="public_ip",  # should be selector since this won't be known until server is created
@@ -29,7 +30,8 @@ def run(stackargs):
 
     # ssh key gen and upload
     arguments = {
-        "ssh_key_name": stack.ssh_key_name
+        "ssh_key_name": stack.ssh_key_name,
+        "aws_default_region": stack.aws_default_region
     }
 
     if stack.public_key_base64:
@@ -48,7 +50,8 @@ def run(stackargs):
     # create ec2 server
     arguments = {
         "hostname": stack.hostname,
-        "ssh_key_name": stack.ssh_key_name
+        "ssh_key_name": stack.ssh_key_name,
+        "aws_default_region": stack.aws_default_region
     }
 
     human_description = "Create ec2 server"
