@@ -1,134 +1,190 @@
 ---
-- hosts: all
+- name: Install Jenkins with Nginx and Self-Signed SSL
+  hosts: all
+  become: true
   vars_files:
     - vars/all.yml
-  remote_user: "{{ os_user }}"
-  become: true
-  gather_facts: false
+
   tasks:
-    - name: Install Python
-      raw: apt -y update && apt install -y python3
-
-    - name: Gather facts after Python installation
-      setup:
-
     - name: Install required system packages
       apt:
         name:
           - apt-transport-https
           - ca-certificates
           - curl
-          - gnupg
-          - lsb-release
+          - docker.io
+          - docker-compose
           - python3-pip
-          - virtualenv
-          - python3-setuptools
+          - openssl
         state: present
         update_cache: yes
 
-    - name: Create keyrings directory
-      file:
-        path: /etc/apt/keyrings
-        state: directory
-        mode: '0755'
-
-    - name: Add Docker GPG apt Key
-      shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-      args:
-        creates: /etc/apt/keyrings/docker.gpg
-
-    - name: Set permissions on GPG key
-      file:
-        path: /etc/apt/keyrings/docker.gpg
-        mode: '0644'
-
-    - name: Add Docker Repository
-      apt_repository:
-        repo: "deb [arch={{ ansible_architecture }} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
-        state: present
-        filename: docker
-
-    - name: Update apt cache
-      apt:
-        update_cache: yes
-
-    - name: Install Docker packages
-      apt:
-        name:
-          - docker-ce
-          - docker-ce-cli
-          - containerd.io
-          - docker-buildx-plugin
-          - docker-compose-plugin
-        state: present
-
-    - name: Add user to docker group
-      user:
-        name: "{{ os_user }}"
-        groups: docker
-        append: yes
-      when: os_user is defined
-
-    - name: Enable and start Docker service
+    - name: Ensure Docker is running
       systemd:
         name: docker
         state: started
         enabled: yes
 
-    - name: Install Docker Python module
-      pip:
-        name: docker
-        state: present
-
-    - name: Create Docker Compose file link
+    - name: Create base directory structure
       file:
-        src: /usr/libexec/docker/cli-plugins/docker-compose
-        dest: /usr/local/bin/docker-compose
-        state: link
-      ignore_errors: yes
-
-    - name: Ensure docker build directory
-      file:
+        path: "{{ item }}"
         state: directory
-        owner: "root"
-        group: "root"
-        path: /var/tmp/docker
+        mode: '0755'
+      loop:
+        - "{{ base_dir }}"
+        - "{{ base_dir }}/certs"
+        - "/var/lib/jenkins"
+        - "{{ base_dir }}/nginx"
+        - "{{ base_dir }}/nginx/conf.d"
 
-    - name: Ensure Jenkins directory on docker host
-      file:
-        state: directory
-        owner: "root"
-        group: "root"
-        path: /var/lib/jenkins
+    - name: Generate SSL private key
+      openssl_privatekey:
+        path: "{{ base_dir }}/certs/jenkins.key"
+        size: 2048
 
-    - name: Create Jenkins directory structure
-      file:
-        state: directory
-        owner: "root"
-        group: "root"
-        mode: "0755"
-        path: "/var/tmp/docker/jenkins/{{ item }}"
-      with_items:
-        - "nginx"
-        - "nginx/sites-enabled"
+    - name: Generate SSL CSR
+      openssl_csr:
+        path: "{{ base_dir }}/certs/jenkins.csr"
+        privatekey_path: "{{ base_dir }}/certs/jenkins.key"
+        common_name: "{{ jenkins_domain }}"
+        organization_name: "Example Organization"
+        country_name: "US"
+        state_or_province_name: "State"
+        locality_name: "City"
 
-    - name: Copy Jenkins files
+    - name: Generate self-signed SSL certificate
+      openssl_certificate:
+        path: "{{ base_dir }}/certs/jenkins.crt"
+        privatekey_path: "{{ base_dir }}/certs/jenkins.key"
+        csr_path: "{{ base_dir }}/certs/jenkins.csr"
+        provider: selfsigned
+        selfsigned_not_after: "+{{ cert_validity_days }}d"
+
+    - name: Create docker-compose.yml
       copy:
-        src: "{{ item.src }}"
-        dest: "{{ item.dest }}"
-        owner: "root"
-        group: "root"
-        mode: "0755"
-      with_items:
-        - { src: "files/jenkins/nginx/sites-enabled/proxy", dest: "/var/tmp/docker/jenkins/nginx/sites-enabled/proxy" }
-        - { src: "files/jenkins/nginx/Dockerfile", dest: "/var/tmp/docker/jenkins/nginx/Dockerfile" }
-        - { src: "files/jenkins/nginx/nginx.conf", dest: "/var/tmp/docker/jenkins/nginx/nginx.conf" }
-        - { src: "files/jenkins/docker-compose.yml", dest: "/var/tmp/docker/jenkins/docker-compose.yml" }
-        - { src: "files/jenkins/restart_jenkins.sh", dest: "/var/tmp/docker/jenkins/restart_jenkins.sh" }
+        dest: "{{ base_dir }}/docker-compose.yml"
+        content: |
+          version: '3'
 
-    - name: Start up Jenkins with docker-compose
-      shell: cd /var/tmp/docker/jenkins && docker compose build && docker compose up -d
-      # Note: 'docker compose' (no hyphen) is the newer syntax with the plugin
+          services:
+            jenkins:
+              image: jenkins/jenkins:2.440.1-lts-jdk17
+              container_name: jenkins
+              restart: unless-stopped
+              user: root
+              privileged: true
+              environment:
+                - TZ={{ timezone }}
+              volumes:
+                - /var/lib/jenkins:/var/jenkins_home
+                - /var/run/docker.sock:/var/run/docker.sock
+              networks:
+                - jenkins-network
+
+            nginx:
+              image: nginx:alpine
+              container_name: nginx-proxy
+              restart: unless-stopped
+              ports:
+                - "80:80"
+                - "443:443"
+              volumes:
+                - ./nginx/conf.d:/etc/nginx/conf.d
+                - ./certs:/etc/nginx/certs
+              depends_on:
+                - jenkins
+              networks:
+                - jenkins-network
+
+          networks:
+            jenkins-network:
+              driver: bridge
+
+    - name: Create Nginx config
+      copy:
+        dest: "{{ base_dir }}/nginx/conf.d/jenkins.conf"
+        content: |
+          server {
+              listen 80;
+              server_name {{ jenkins_domain }};
+              return 301 https://$host$request_uri;
+          }
+
+          server {
+              listen 443 ssl;
+              server_name {{ jenkins_domain }};
+
+              ssl_certificate /etc/nginx/certs/jenkins.crt;
+              ssl_certificate_key /etc/nginx/certs/jenkins.key;
+              
+              ssl_protocols TLSv1.2 TLSv1.3;
+              ssl_prefer_server_ciphers on;
+              ssl_session_timeout 1d;
+              ssl_session_cache shared:SSL:50m;
+
+              # Jenkins reverse proxy
+              location / {
+                  # Use a fixed host header to avoid the duplicate host header issue
+                  proxy_pass http://jenkins:8080;
+                  proxy_set_header Host jenkins:8080;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  
+                  # Required for Jenkins
+                  proxy_http_version 1.1;
+                  proxy_request_buffering off;
+                  proxy_buffering off;
+                  
+                  # Timeouts
+                  proxy_connect_timeout 150;
+                  proxy_send_timeout 100;
+                  proxy_read_timeout 100;
+
+                  # Don't limit data transfer
+                  client_max_body_size 0;
+              }
+          }
+
+    - name: Set permissions for Jenkins volume
+      file:
+        path: "/var/lib/jenkins"
+        owner: 1000
+        group: 1000
+        mode: '0755'
+        recurse: yes
+
+    - name: Start Docker Compose services
+      shell: docker-compose up -d
+      args:
+        chdir: "{{ base_dir }}"
+
+    - name: Wait for Jenkins to start
+      wait_for:
+        host: localhost
+        port: 443
+        delay: 10
+        timeout: 180
+
+    - name: Wait for Jenkins to initialize
+      pause:
+        seconds: 30
+        prompt: "Waiting for Jenkins to initialize..."
+
+    - name: Get initial Jenkins admin password
+      shell: docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword || echo "Password not available yet, check again later"
+      register: jenkins_password
+      changed_when: false
+      
+    - name: Display Jenkins admin password
+      debug:
+        msg: "Initial Jenkins admin password: {{ jenkins_password.stdout }}"
+
+    - name: Add Jenkins domain to hosts file
+      lineinfile:
+        path: /etc/hosts
+        line: "127.0.0.1 {{ jenkins_domain }}"
+        state: present
 
     - name: Wait until Jenkins come up
       shell: sleep 180
@@ -136,25 +192,41 @@
     - name: Get initial admin password
       shell: 'cat /var/lib/jenkins/secrets/initialAdminPassword'
       register: admin_auth_token
-    
-    - name: Create CRUMB authentication request
-      uri:
-        url: 'http://localhost:8081/crumbIssuer/api/xml?xpath=concat(//crumbRequestField,":",//crumb)'
-        user: admin
-        password: '{{ admin_auth_token.stdout }}'
-        force_basic_auth: yes
-        return_content: yes
-      register: crumb
-    
-    - name: Add Jenkins administration account
-      uri:
-        method: POST
-        url: 'http://localhost:8081/securityRealm/createAccountByAdmin'
-        user: admin
-        password: '{{ admin_auth_token.stdout }}'
-        force_basic_auth: yes
-        follow_redirects: all
-        headers:
-          Jenkins-Crumb: '{{ crumb.content.split(":")[1] }}'
-          Cookie: '{{ crumb.set_cookie }}'
-        body: 'username={{ jenkins_user }}&password1={{ jenkins_pass }}&password2={{ jenkins_pass }}&fullname={{ jenkins_fullname }}&email={{ jenkins_email }}'
+
+    - name: Use Jenkins CLI to create user
+      shell: |
+        docker exec jenkins bash -c '
+        java -jar /var/jenkins_home/war/WEB-INF/jenkins-cli.jar -s http://localhost:8080/ -auth admin:{{ admin_auth_token.stdout }} \
+        groovy = << EOG
+        import jenkins.model.*
+        import hudson.security.*
+        
+        def instance = Jenkins.getInstance()
+        def realm = instance.getSecurityRealm()
+        def user = realm.createAccount("{{ jenkins_user }}", "{{ jenkins_pass }}")
+        user.setFullName("{{ jenkins_fullname }}")
+        
+        // Add email if the Mailer plugin is installed
+        def emailProperty = Class.forName("hudson.tasks.Mailer\$UserProperty")
+        def constructor = emailProperty.getConstructor(String.class)
+        user.addProperty(constructor.newInstance("{{ jenkins_email }}"))
+        
+        user.save()
+        println "User {{ jenkins_user }} created successfully"
+        EOG
+        '
+      register: user_creation
+      failed_when: user_creation.rc != 0
+      changed_when: true
+
+    - name: Display user creation result
+      debug:
+        var: user_creation.stdout
+
+    - name: Show access instructions
+      debug:
+        msg: 
+          - "Jenkins setup complete!"
+          - "Access Jenkins at https://{{ jenkins_domain }} or using the server's IP address"
+          - "Login with: {{ jenkins_user }} / {{ jenkins_pass }}"
+          - "You will need to accept the self-signed certificate in your browser"

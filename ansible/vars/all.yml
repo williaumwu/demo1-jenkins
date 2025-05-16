@@ -1,6 +1,12 @@
 ---
-os_user: root
-jenkins_fullname: jenkins
-jenkins_email: jenkins@fake-email.com
-jenkins_user: jenkins
-jenkins_pass: jenkins123
+# Jenkins configuration
+jenkins_domain: jenkins.local
+timezone: UTC
+base_dir: /opt/jenkins-setup
+cert_validity_days: 3650
+
+# Jenkins user setup
+jenkins_user: admin
+jenkins_pass: password123
+jenkins_fullname: "Jenkins Admin"
+jenkins_email: "admin@example.com"
