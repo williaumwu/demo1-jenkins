@@ -1,0 +1,33 @@
+global:
+  arguments: 
+    aws_default_region: us-east-2
+  metadata:   
+    labels:
+       demo: 
+         environment: demo
+         purpose: test
+         cloud: aws
+    matchSelectors:
+       ssh_key_info:
+         match_labels:
+           environment: demo
+           purpose: test
+           cloud: aws
+         resource_type: ssh_key_pair
+       server_info:
+         match_labels:
+           environment: demo
+           purpose: test
+           cloud: aws
+         resource_type: server
+infrastructure:
+   jenkins_server:
+       stack_name: williaumwu:::jenkins_on_ec2
+       arguments:
+          hostname: config0-demo-jenkins
+          ssh_key_name: config0-demo
+          public_key_base64: selector:::ssh_key_info::public_key_base64
+          public_ip: selector:::server_info::public_ip
+       metadata:
+          labels:
+            - demo
