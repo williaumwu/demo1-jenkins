@@ -1,0 +1,5 @@
+assets:
+   execgroups:
+     - name: jenkins_with_docker
+       app_name: ansible
+       folder: ansible
