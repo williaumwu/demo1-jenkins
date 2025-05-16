@@ -1,0 +1,13 @@
+desc: This stack creates and installs Jenkins on ec2 server.
+release: 0.0.1
+author: Wiliaumwu Wu
+license: GPL-3.0
+categories: 
+   - ansible
+   - cloud
+tags:
+   - ansible
+   - jenkins
+   - vms
+   - cloud
+   - public_cloud
