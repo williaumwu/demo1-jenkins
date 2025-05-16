@@ -31,3 +31,6 @@ infrastructure:
        metadata:
           labels:
             - demo
+          matchSelectors:
+            - ssh_key_info
+            - server_info
