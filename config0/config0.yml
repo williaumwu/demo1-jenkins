@@ -27,6 +27,7 @@ infrastructure:
           hostname: config0-demo-jenkins
           ssh_key_name: config0-demo
           private_key_base64: selector:::ssh_key_info::private_key_base64
+          public_key_base64: selector:::ssh_key_info::public_key_base64
           public_ip: selector:::server_info::public_ip
        metadata:
           labels:
