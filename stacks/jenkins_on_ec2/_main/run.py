@@ -7,7 +7,12 @@ def run(stackargs):
     # Add default variables
     stack.parse.add_required(key="hostname")
     stack.parse.add_required(key="ssh_key_name")
-    stack.parse.add_required(key="private_key_base64")
+    stack.parse.add_optional(key="public_ip",  # should be selector since this won't be known until server is created
+                             default="null")
+    stack.parse.add_optional(key="private_key_base64",  # should be selector since this won't be known until ssh keys are created
+                             default="null")
+    stack.parse.add_optional(key="public_key_base64",  # should be selector since this won't be known until ssh keys are created
+                             default="null")
 
     # Use docker container to execute ansible playbooks
     stack.parse.add_optional(key="ansible_docker_image",
@@ -24,9 +29,11 @@ def run(stackargs):
 
     # ssh key gen and upload
     arguments = {
-        "ssh_key_name": stack.ssh_key_name,
-        "private_key_base64": stack.private_key_base64
+        "ssh_key_name": stack.ssh_key_name
     }
+
+    if stack.public_key_base64:
+        arguments["public_key_base64"] = stack.public_key_base64
 
     human_description = "Create ssh keys and upload to AWS"
     inputargs = {
@@ -56,7 +63,8 @@ def run(stackargs):
     # install jenkins
     arguments = {
         "hostname": stack.hostname,
-        "ssh_key_name": stack.ssh_key_name
+        "public_ip": stack.public_ip,
+        "private_key_base64": stack.private_key_base64
     }
 
     human_description = "Install and configure Jenkins"

@@ -6,7 +6,6 @@ def run(stackargs):
 
     # Add default variables
     stack.parse.add_required(key="hostname")
-    stack.parse.add_required(key="ssh_key_name")
     stack.parse.add_required(key="public_ip")
     stack.parse.add_required(key="private_key_base64")
 
@@ -63,8 +62,8 @@ def run(stackargs):
     arguments = {
         "remote_file": "/var/lib/jenkins/secrets/initialAdminPassword",
         "key": "jenkins_password",
-        "hostname": stack.hostname,
-        "ssh_key_name": stack.ssh_key_name
+        "public_ip": stack.public_ip,
+        "private_key_base64": stack.private_key_base64
     }
 
     human_description = "Publish jenkins admin init password"
