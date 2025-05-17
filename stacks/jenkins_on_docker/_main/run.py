@@ -62,7 +62,7 @@ def run(stackargs):
     arguments = {
         "remote_file": "/var/lib/jenkins/secrets/initialAdminPassword",
         "key": "jenkins_password",
-        "public_ip": stack.public_ip,
+        "ipaddress": stack.public_ip,
         "private_key_base64": stack.private_key_base64
     }
 
