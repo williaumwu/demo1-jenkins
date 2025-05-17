@@ -8,6 +8,8 @@ def run(stackargs):
     stack.parse.add_required(key="aws_default_region", default="us-east-1")
     stack.parse.add_required(key="hostname")
     stack.parse.add_required(key="ssh_key_name")
+    stack.parse.add_optional(key="public_ip",
+                             default="null")
 
     # Use docker container to execute ansible playbooks
     stack.parse.add_optional(key="ansible_docker_image",
@@ -59,6 +61,9 @@ def run(stackargs):
         "hostname": stack.hostname,
         "ssh_key_name": stack.ssh_key_name
     }
+
+    if stack.public_ip:
+        arguments["public_ip"] = stack.public_ip
 
     human_description = "Install and configure Jenkins"
     inputargs = {
