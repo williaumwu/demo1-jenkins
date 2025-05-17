@@ -2,7 +2,7 @@ def _get_public_ip(stack):
     return stack.get_resource(
         name=stack.hostname,
         must_be_one=True,
-        use_labels="project:::self::default",
+        use_labels="project",
         resource_type=stack.resource_type_hostname,
     )[0]["public_ip"]
 
@@ -10,7 +10,7 @@ def _get_private_key(stack):
     return stack.get_resource(
         name=stack.ssh_key_name,
         must_be_one=True,
-        use_labels="project:::self::default",
+        use_labels="project",
         resource_type=stack.resource_type_ssh_key
     )[0]["private_key_base64"]
 
