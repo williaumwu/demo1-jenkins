@@ -11,7 +11,7 @@ def _get_private_key(stack):
         name=stack.ssh_key_name,
         must_be_one=True,
         use_labels="project:::self::default",
-        resource_type=stack.resource_type_ssh_key_name,
+        resource_type=stack.resource_type_ssh_key
     )[0]["private_key_base64"]
 
 def run(stackargs):
