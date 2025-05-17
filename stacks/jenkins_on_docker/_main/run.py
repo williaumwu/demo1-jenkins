@@ -1,3 +1,19 @@
+def _get_ipaddress(stack):
+    return stack.get_resource(
+        name=stack.hostname,
+        must_be_one=True,
+        use_labels="project",
+        resource_type=stack.resource_type_hostname,
+    )[0]["public_ip"]
+
+def _get_private_key(stack):
+    return stack.get_resource(
+        name=stack.ssh_key_name,
+        must_be_one=True,
+        use_labels="project",
+        resource_type=stack.resource_type_ssh_key_name,
+    )[0]["private_key_base64"]
+
 def run(stackargs):
     import json
 
@@ -6,8 +22,7 @@ def run(stackargs):
 
     # Add default variables
     stack.parse.add_required(key="hostname")
-    stack.parse.add_required(key="public_ip")
-    stack.parse.add_required(key="private_key_base64")
+    stack.parse.add_required(key="ssh_key_name")
 
     # Use docker container to execute ansible playbooks
     stack.parse.add_optional(key="ansible_docker_image",
@@ -25,8 +40,11 @@ def run(stackargs):
     stack.init_execgroups()
     stack.init_substacks()
 
+    stack.set_variable("ipaddress", _get_ipaddress(stack))
+    stack.set_variable("private_key_base64", _get_private_key(stack))
+
     ansible_hosts_file_content = json.dumps({
-        "all": [stack.public_ip]
+        "all": [stack.ipaddress]
     })
 
     # Generate stateful id
@@ -53,8 +71,8 @@ def run(stackargs):
     # Output to ui
     stack.output_to_ui({
         "hostname": stack.hostname,
-        "jenkins_ipaddress": stack.public_ip,
-        "jenkins_url": f"https://{stack.public_ip}",
+        "jenkins_ipaddress": stack.ipaddress,
+        "jenkins_url": f"https://{stack.ipaddress}",
         "jenkins_user": "admin"
     })
 
@@ -62,8 +80,8 @@ def run(stackargs):
     arguments = {
         "remote_file": "/var/lib/jenkins/secrets/initialAdminPassword",
         "key": "jenkins_password",
-        "ipaddress": stack.public_ip,
-        "private_key_base64": stack.private_key_base64
+        "ipaddress": stack.ipaddress,
+        "private_key_hash": stack.private_key_base64
     }
 
     human_description = "Publish jenkins admin init password"
