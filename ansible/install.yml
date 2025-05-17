@@ -116,7 +116,7 @@
 
               ssl_certificate /etc/nginx/certs/jenkins.crt;
               ssl_certificate_key /etc/nginx/certs/jenkins.key;
-              
+
               ssl_protocols TLSv1.2 TLSv1.3;
               ssl_prefer_server_ciphers on;
               ssl_session_timeout 1d;
@@ -130,12 +130,12 @@
                   proxy_set_header X-Real-IP $remote_addr;
                   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                   proxy_set_header X-Forwarded-Proto $scheme;
-                  
+
                   # Required for Jenkins
                   proxy_http_version 1.1;
                   proxy_request_buffering off;
                   proxy_buffering off;
-                  
+
                   # Timeouts
                   proxy_connect_timeout 150;
                   proxy_send_timeout 100;
@@ -166,58 +166,63 @@
         delay: 10
         timeout: 180
 
-    - name: Wait for Jenkins to initialize
-      pause:
-        seconds: 30
-        prompt: "Waiting for Jenkins to initialize..."
-
-    - name: Get initial Jenkins admin password
-      shell: docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword || echo "Password not available yet, check again later"
-      register: jenkins_password
-      changed_when: false
-      
-    - name: Display Jenkins admin password
-      debug:
-        msg: "Initial Jenkins admin password: {{ jenkins_password.stdout }}"
-
     - name: Add Jenkins domain to hosts file
       lineinfile:
         path: /etc/hosts
         line: "127.0.0.1 {{ jenkins_domain }}"
         state: present
 
-    - name: Wait until Jenkins come up
-      shell: sleep 180
+    - name: Wait for Jenkins to initialize fully
+      pause:
+        seconds: 30
+      
+    - name: Get initial Jenkins admin password
+      shell: docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+      register: jenkins_password
+      changed_when: false
+      retries: 5
+      delay: 10
+      until: jenkins_password.rc == 0
 
-    - name: Get initial admin password
-      shell: 'cat /var/lib/jenkins/secrets/initialAdminPassword'
-      register: admin_auth_token
+    - name: Display Jenkins admin password
+      debug:
+        msg: "Initial Jenkins admin password: {{ jenkins_password.stdout }}"
 
-    - name: Use Jenkins CLI to create user
+    - name: Create Jenkins user
       shell: |
-        docker exec jenkins bash -c '
-        java -jar /var/jenkins_home/war/WEB-INF/jenkins-cli.jar -s http://localhost:8080/ -auth admin:{{ admin_auth_token.stdout }} \
-        groovy = << EOG
+        docker exec jenkins bash -c "
+        java -jar /var/jenkins_home/war/WEB-INF/jenkins-cli.jar -s http://localhost:8080/ -auth admin:{{ jenkins_password.stdout }} \
+        groovy = << 'EOG'
         import jenkins.model.*
         import hudson.security.*
-        
+
         def instance = Jenkins.getInstance()
         def realm = instance.getSecurityRealm()
-        def user = realm.createAccount("{{ jenkins_user }}", "{{ jenkins_pass }}")
-        user.setFullName("{{ jenkins_fullname }}")
         
-        // Add email if the Mailer plugin is installed
-        def emailProperty = Class.forName("hudson.tasks.Mailer\$UserProperty")
-        def constructor = emailProperty.getConstructor(String.class)
-        user.addProperty(constructor.newInstance("{{ jenkins_email }}"))
-        
-        user.save()
-        println "User {{ jenkins_user }} created successfully"
+        try {
+          def user = realm.createAccount('{{ jenkins_user }}', '{{ jenkins_pass }}')
+          user.setFullName('{{ jenkins_fullname }}')
+          
+          try {
+            def emailProperty = Class.forName('hudson.tasks.Mailer\$UserProperty')
+            def constructor = emailProperty.getConstructor(String.class)
+            user.addProperty(constructor.newInstance('{{ jenkins_email }}'))
+          } catch (Exception e) {
+            println 'Could not set email: ' + e.getMessage()
+          }
+          
+          user.save()
+          println 'User {{ jenkins_user }} created successfully'
+        } catch (Exception e) {
+          println 'Error creating user: ' + e.getMessage()
+          System.exit(1)
+        }
         EOG
-        '
+        "
       register: user_creation
+      changed_when: "'created successfully' in user_creation.stdout"
       failed_when: user_creation.rc != 0
-      changed_when: true
+      ignore_errors: yes
 
     - name: Display user creation result
       debug:
@@ -225,7 +230,7 @@
 
     - name: Show access instructions
       debug:
-        msg: 
+        msg:
           - "Jenkins setup complete!"
           - "Access Jenkins at https://{{ jenkins_domain }} or using the server's IP address"
           - "Login with: {{ jenkins_user }} / {{ jenkins_pass }}"
