@@ -29,6 +29,14 @@ def run(stackargs):
     stack.parse.add_optional(key="ansible_docker_image",
                              default="config0/ansible-run-env")
 
+    stack.parse.add_optional(key="resource_type_ssh_key",
+                             default="ssh_key_pair",
+                             types="str")
+
+    stack.parse.add_optional(key="resource_type_hostname",
+                             default="server",
+                             types="str")
+
     # Add execgroup
     stack.add_execgroup("williaumwu:::demo1-jenkins::jenkins_with_docker")
 
